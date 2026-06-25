@@ -1,0 +1,75 @@
+# Piper MoveIt Docker — compose 정의
+# 사용법:
+#   docker compose up mock                  # 기본: 브라우저로 http://localhost:6080 접속해서 RViz mock 데모 보기/조작
+#   docker compose --profile dev up -d dev  # ./ros2_ws 마운트 → `docker compose exec dev bash` 로 안에서 colcon build/launch
+#   docker compose --profile real up real   # 리눅스 + CAN 실물 (privileged, host network) → 데스크탑은 http://localhost (포트 80)
+#   docker compose --profile gpu up gpu     # NVIDIA GPU 가속 mock
+#
+# 값은 versions.env 에서 가져온다 (수정 금지, 읽기 전용 핀).
+# 이미지 좌표: 로컬 piper-moveit:jazzy  /  GHCR: ghcr.io/${OWNER}/piper-moveit:jazzy
+# MODE 는 environment 로 구동된다 (베이스 supervisord 가 CMD/command 를 소비하지 않음).
+name: piper-moveit-docker
+
+# 공통 앵커: 모든 서비스가 동일한 image / shm_size / ports / env 를 재사용한다.
+x-piper: &piper
+  # OWNER 미정이어도 로컬 빌드 태그로 동작. GHCR 사용 시: ghcr.io/${OWNER}/piper-moveit:jazzy
+  image: ${IMAGE:-piper-moveit:jazzy}
+  env_file: versions.env
+  # RViz/Qt 가 공유메모리 부족하면 크래시한다 → 512m 필수.
+  shm_size: "512m"
+  ports:
+    # 베이스의 noVNC/websockify 는 컨테이너 내부 80번에서 listen → 호스트 6080 으로 매핑.
+    # 보안 기본값: localhost 전용 바인딩 (팔을 움직일 수 있으니 무인증 noVNC 를 LAN 에 열지 않음).
+    # LAN/원격에서 접속하려면 아래 "127.0.0.1:" 를 제거.
+    - "127.0.0.1:${NOVNC_PORT:-6080}:80"
+
+services:
+  # ── mock (기본 프로파일) ──────────────────────────────────────────
+  # 마운트 없음. 이미지에 내장된 agx_arm_ros 빌드로 가짜 하드웨어 데모만 띄운다.
+  # 그냥 브라우저로 보기 위한 일상 경로.
+  mock:
+    <<: *piper
+    profiles: ["mock"]
+    environment:
+      MODE: mock
+
+  # ── real ─────────────────────────────────────────────────────────
+  # 실물 CAN 하드웨어용 (리눅스 전용). can0 접근을 위해 host 네트워크 + privileged.
+  # ⚠️ 보안: real 은 root + host network + privileged 로 돌아 사실상 호스트 root 권한과 동등하고,
+  #    noVNC 는 무인증으로 호스트에 노출된다. 신뢰할 수 있는 랩 머신에서만, 격리된 네트워크에서 쓸 것.
+  # network_mode: host 면 ports 매핑이 무시된다 → 데스크탑은 호스트의 80 번 (http://localhost) 으로 직접 노출됨.
+  real:
+    <<: *piper
+    profiles: ["real"]
+    network_mode: host
+    privileged: true
+    environment:
+      MODE: real
+    volumes:
+      - /dev:/dev   # CAN/USB 디바이스 접근
+
+  # ── dev ──────────────────────────────────────────────────────────
+  # 호스트 ./ros2_ws 를 /ws 로 바인드 마운트 → `docker compose exec dev bash` 로 안에서 직접 colcon build / launch.
+  # 라이브 코드 편집용. (마운트하면 install/ 이 없으니 ros-app 은 자동 실행 안 되고, 셸에서 수동 빌드)
+  dev:
+    <<: *piper
+    profiles: ["dev"]
+    environment:
+      MODE: dev
+    volumes:
+      - ./ros2_ws:/ws
+
+  # ── gpu (옵션) ───────────────────────────────────────────────────
+  # mock 과 동일하되 NVIDIA GPU 가속. 호스트에 nvidia-container-toolkit 설치 필요.
+  gpu:
+    <<: *piper
+    profiles: ["gpu"]
+    environment:
+      MODE: mock
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]

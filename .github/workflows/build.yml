@@ -1,0 +1,103 @@
+name: build-and-push
+
+# Triggers:
+# - push to main: build + push :jazzy and :sha-<short> on every merge.
+# - tag v*: also publish the semver tags (v1.2.3, 1.2, 1, etc.).
+# - workflow_dispatch: manual rebuild button.
+# - schedule (weekly): refresh the image so apt layers (ros-jazzy-*, security
+#   updates) get re-pulled even when our source code hasn't changed. The base
+#   image and apt repos move underneath us, so a periodic rebuild keeps :jazzy
+#   reasonably current without manual intervention.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+  schedule:
+    # Mondays 04:17 UTC — odd minute to avoid the top-of-hour cron stampede.
+    - cron: '17 4 * * 1'
+
+# GITHUB_TOKEN needs packages:write to push to GHCR. No extra secret required.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/piper-moveit
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          # agx_arm_ros is a git submodule with its own nested submodule;
+          # recursive is required so the Dockerfile's COPY of ros2_ws/src works.
+          submodules: recursive
+
+      # Load pinned values from versions.env into $GITHUB_ENV so they can be
+      # referenced as build-args below. We filter to just the keys we need and
+      # ignore comments/blank lines, keeping this robust to extra entries.
+      - name: Load pinned versions from versions.env
+        run: |
+          set -euo pipefail
+          for key in BASE_IMAGE AGX_ARM_ROS_SHA PYAGXARM_SHA; do
+            line="$(grep -E "^${key}=" versions.env | head -n1)"
+            if [ -z "${line}" ]; then
+              echo "::error::${key} not found in versions.env"
+              exit 1
+            fi
+            # strip inline comments (value followed by whitespace + '#') and trim
+            value="${line#*=}"
+            value="${value%%#*}"
+            value="$(printf '%s' "${value}" | sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]*//')"
+            echo "${key}=${value}" >> "$GITHUB_ENV"
+            echo "${key}=${value}"
+          done
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            # always tag :jazzy (our rolling release line)
+            type=raw,value=jazzy
+            # short commit sha: sha-<short>
+            type=sha,prefix=sha-
+            # semver tags only on tag pushes (v1.2.3 -> 1.2.3, 1.2, 1)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # v1 ships amd64 only. The Tiryoh base supports arm64, so to add it
+          # later just extend this to:  platforms: linux/amd64,linux/arm64
+          # (note: arm64 builds use QEMU emulation here and will be slow).
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_IMAGE=${{ env.BASE_IMAGE }}
+            AGX_ARM_ROS_SHA=${{ env.AGX_ARM_ROS_SHA }}
+            PYAGXARM_SHA=${{ env.PYAGXARM_SHA }}
+          # GHA layer cache to speed up incremental (and scheduled) rebuilds.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
