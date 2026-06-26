@@ -37,12 +37,34 @@ sudo apt update && sudo apt install -y docker-ce docker-ce-cli containerd.io doc
 docker compose version    # v2.x 확인
 ```
 
+> ⚠️ **snap docker 를 쓰는 경우 (실측 gotcha)**: snap 으로 깔린 docker 는 데몬이 `--group docker` 로 뜨지만,
+> **docker 그룹이 생기기 전에 데몬이 먼저 기동되면 소켓이 `root:root` 로 잡혀** 일반 유저가 `permission denied` 를 본다.
+> 일회성 해결:
+> ```bash
+> sudo groupadd -f docker
+> sudo usermod -aG docker "$USER"          # 재로그인 또는 새 셸에서 `newgrp docker`
+> sudo snap restart docker                  # 데몬이 docker 그룹으로 소켓을 다시 잡게(--group docker)
+> sudo chgrp docker /var/run/docker.sock && sudo chmod g+rw /var/run/docker.sock  # restart 직후에도 root:root 면 수동 보정
+> ls -l /var/run/docker.sock                # → root docker 면 OK
+> ```
+> 그룹만 한 번 만들어 두면 재부팅 후엔 데몬이 알아서 `root:docker` 로 잡는다. 또한 snap docker 는 **confinement** 때문에
+> `/tmp` 접근/`docker cp` 대상 경로가 제한될 수 있으니(홈 디렉토리는 OK), 가능하면 위 **공식 apt(docker-ce)** 가 마찰이 적다.
+
 ### 1-3. 이미지 받기 (GHCR)
 GHCR 패키지가 **기본 private** 이니, 공개로 바꿨으면 로그인 없이:
 ```bash
 docker pull ghcr.io/bigenlight/piper-moveit:jazzy
 ```
-아직 private 면: `read:packages` 권한 classic PAT 로 `echo $PAT | docker login ghcr.io -u Bigenlight --password-stdin` 후 pull. (또는 리포 clone 해서 `docker compose --profile real build`.)
+아직 private 면: `read:packages` 권한 classic PAT 로 `echo $PAT | docker login ghcr.io -u Bigenlight --password-stdin` 후 pull.
+
+**또는 리포에서 직접 빌드** (실측 정정): compose 에는 `build:` 섹션이 없어 `docker compose build` 는 *"No services to build"* 로 아무것도 안 한다. **서브모듈 init 후 `docker build`** 로 빌드한다:
+```bash
+git submodule update --init --recursive      # agx_arm_ros + (중첩) agx_arm_urdf — 안 하면 colcon 빌드 실패
+set -a; . ./versions.env; set +a              # BASE_IMAGE / PYAGXARM_SHA 핀 값 로드
+docker build -t piper-moveit:jazzy \
+  --build-arg BASE_IMAGE="$BASE_IMAGE" \
+  --build-arg PYAGXARM_SHA="$PYAGXARM_SHA" .  # AGX_ARM_ROS_SHA 는 서브모듈로 고정(빌드인자 아님)
+```
 
 > 22.04 특이 이슈 없음: cgroup v2 / iptables-nft / AppArmor 전부 `real`(host-net + privileged)엔 영향 없음.
 

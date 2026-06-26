@@ -193,6 +193,9 @@ mock과 동일한데 NVIDIA GPU를 예약해서 붙입니다. RViz 회전/렌더
 | noVNC 3D 화면이 빠른 회전 때 끊김 | noVNC 특성상 빠른 시점 회전은 좀 버벅입니다. **조작 자체는 정상**이니 천천히 돌리면 됩니다. (부드럽게 원하면 GPU 프로파일) |
 | (direct) 호스트 `ros2 node list` 가 빔 | ① discovery 수렴 대기(~20-30초) → `piper_wait_ready`. ② 호스트 UFW INPUT DROP → `bash scripts/setup-host-firewall.sh` (헬퍼가 자동 호출하지만 수동 확인 가능). ③ 도메인 확인: `echo $ROS_DOMAIN_ID` 가 42 여야 함(헬퍼 source 했는지). |
 | (direct) `topic echo` 에 "A message was lost" | bridge 경유 UDPv4 유니캐스트의 일시적 알림. **데이터는 정상 도착**하니 무시해도 됩니다. |
+| (real) noVNC 가 `localhost:80` 에서 안 열림 | **real 데스크탑은 `http://localhost:6080`** 입니다(80 아님). host-network 라 ubuntu 권한으로 80(<1024)을 못 열어 `desktop-realfix.sh` 가 noVNC 를 6080 으로 재배치합니다. |
+| (real) 접속했는데 화면이 검음 / "갑자기 연결 끊김" | host-network 가 호스트의 X 디스플레이 `:1` 과 충돌 → 컨테이너 VNC 가 `:2` 로 재배치됩니다. 보통 자동 복구되지만, 끊기면 **브라우저 새로고침**. 그래도 안 되면 `docker exec <c> supervisorctl status vnc` 로 `vnc` 가 RUNNING 인지 확인(FATAL 이면 `supervisorctl restart vnc`). 화면잠금(MATE)은 desktop-realfix 가 꺼 둡니다. |
+| (real) `firmware version` / `enable status True` 가 안 뜸 | CAN 미연결/포트 불일치. 호스트가 **두 개 이상 CAN 인터페이스**를 가질 수 있으니(예: can0=Piper 1Mbps, can1=타 장치 500kbps), `candump can0` 로 프레임이 흐르고 `ip -details link show can0` 이 `bitrate 1000000` 인지로 Piper 쪽을 확인. |
 
 ---
 
@@ -209,6 +212,23 @@ mock과 동일한데 NVIDIA GPU를 예약해서 붙입니다. RViz 회전/렌더
 > **이게 핵심**: AgileX `agx_arm_ros` 레포는 릴리스 태그가 없습니다. 그래서 브랜치가 아니라 **commit SHA로 핀**합니다. 안 그러면 다음 사람이 빌드할 때 ros2 브랜치가 움직여서 깨질 수 있습니다.
 
 베이스 이미지도 `@sha256:<digest>` 형태로 **digest 핀** 되어 있습니다 (`:jazzy` 태그는 시간 지나면 갱신되므로). 이 digest 는 multi-arch 인덱스라 amd64/arm64 둘 다 같은 베이스를 가리킵니다. 베이스를 새 버전으로 올리려면 `docker buildx imagetools inspect ghcr.io/tiryoh/ros2-desktop-vnc:jazzy` 로 새 digest 를 확인해 `versions.env` 를 갱신하세요.
+
+---
+
+## 로컬 빌드 (처음 한 번)
+
+`docker compose up` 은 이미지가 이미 있다고 가정합니다. 리포를 갓 clone 했으면 먼저 빌드하세요.
+**compose 에는 `build:` 섹션이 없어 `docker compose build` 는 아무것도 안 합니다** — `docker build` 를 직접 씁니다:
+
+```bash
+git submodule update --init --recursive      # agx_arm_ros + (중첩) agx_arm_urdf. 안 하면 colcon 빌드 실패
+set -a; . ./versions.env; set +a              # BASE_IMAGE / PYAGXARM_SHA 핀 값 로드
+docker build -t piper-moveit:jazzy \
+  --build-arg BASE_IMAGE="$BASE_IMAGE" \
+  --build-arg PYAGXARM_SHA="$PYAGXARM_SHA" .  # AGX_ARM_ROS_SHA 는 서브모듈로 고정(빌드인자 아님)
+```
+
+빌드가 끝나면 `docker compose up mock` (또는 `--profile real up`) 으로 띄웁니다. (CI 빌드 이미지를 그냥 받으려면 아래 GHCR 참고.)
 
 ---
 
