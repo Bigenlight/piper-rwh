@@ -23,6 +23,18 @@ AgileX **Piper** 로봇팔(그리퍼 포함)을 **브라우저 안에서** MoveI
 
 로봇 하드웨어 하나 없이 그냥 데모 보고 싶을 때. 이게 일상 경로입니다.
 
+> ⚠️ **처음이면 이미지부터 빌드** (한 번만). compose 에는 `build:` 가 없어서 — `docker compose build` 는 *"No services to build"* —
+> 이미지가 없으면 `docker compose up` 이 바로 실패합니다. 갓 clone 했으면 먼저:
+> ```bash
+> git submodule update --init --recursive   # agx_arm_ros + (중첩) agx_arm_urdf
+> set -a; . ./versions.env; set +a
+> docker build -t piper-moveit:jazzy \
+>   --build-arg BASE_IMAGE="$BASE_IMAGE" --build-arg PYAGXARM_SHA="$PYAGXARM_SHA" .
+> ```
+> (자세히는 아래 [로컬 빌드](#로컬-빌드-처음-한-번). GHCR 이미지를 그냥 받으려면 [GHCR 사용](#ghcr-사용-빌드-없이-받기).)
+
+빌드가 됐으면(또는 이미 이미지가 있으면):
+
 ```bash
 docker compose --profile mock up
 # 또는 동일하게:
@@ -59,14 +71,21 @@ CLI로 직접 던지고 싶으면 컨테이너 셸에서 (예시):
 source /opt/ros/jazzy/setup.bash
 source /ws/install/setup.bash
 
-# 현재 관절 피드백 보기 — 주의: /joint_states 아니라 /control/joint_states 로 리맵됨
-ros2 topic echo /control/joint_states
+# 현재 관절 피드백 보기 — 주의: /joint_states 가 아니라 리맵된 토픽을 봐야 함
+#   mock : /control/joint_states      (가짜 하드웨어 상태)
+#   real : /feedback/joint_states     (실물 팔이 CAN 으로 올리는 실제 자세) — 둘 다 존재
+ros2 topic echo /control/joint_states      # mock
+# ros2 topic echo /feedback/joint_states   # real
 
 # 컨트롤러 상태 확인
 ros2 control list_controllers
 ```
 
-> **함정**: 관절 피드백 토픽은 `/joint_states`가 아니라 **`/control/joint_states`** 로 리맵되어 있습니다. echo가 안 나온다고 당황하지 마세요.
+> **함정**: 관절 피드백 토픽은 `/joint_states` 가 아니라 리맵됩니다 — **mock 은 `/control/joint_states`**,
+> **real 은 `/feedback/joint_states`**(실물 피드백). echo 가 안 나온다고 당황하지 마세요.
+
+> **컨테이너 셸 진입**: ROS 노드는 유저 `ubuntu` 로 돌고 DDS 공유메모리가 유저별이라 **`-u ubuntu` 로 들어가야** 그래프가 보입니다.
+> mock: `docker compose exec -u ubuntu mock bash` · real(host-net): `docker exec -u ubuntu piper-moveit-docker-real-1 bash` → 안에서 위 `source` 두 줄 먼저.
 
 ---
 
@@ -146,9 +165,17 @@ ros2 action send_goal /arm_controller/follow_joint_trajectory control_msgs/actio
 
 **구동:**
 ```bash
+# 0) 이미지 (처음 한 번) — compose 엔 build 섹션이 없으니 docker build 로. 자세히는 아래 "로컬 빌드".
+git submodule update --init --recursive
+set -a; . ./versions.env; set +a
+docker build -t piper-moveit:jazzy --build-arg BASE_IMAGE="$BASE_IMAGE" --build-arg PYAGXARM_SHA="$PYAGXARM_SHA" .
+
+# 1) 호스트 CAN 올리기 + 확인
 sudo ./scripts/host-can-up.sh        # gs_usb 로드 + can0 up @1Mbps (down-first, txqueuelen 포함)
 candump can0                          # (팔 켠 상태) 프레임 흐르는지 확인
-docker compose --profile real up      # real = host network → 데스크탑은 http://localhost:6080
+
+# 2) 띄우기  (real = host network → 데스크탑은 http://localhost:6080)
+docker compose --profile real up
 ```
 
 > **real 도 noVNC 는 `http://localhost:6080`** (mock 과 동일 포트). real 은 host-network 라, 호스트가 자체
