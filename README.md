@@ -131,26 +131,36 @@ ros2 action send_goal /arm_controller/follow_joint_trajectory control_msgs/actio
 ## 실물 로봇 (리눅스 + CAN)
 
 > **리눅스 전용입니다.** 윈도우 / 맥에서는 실물 로봇을 못 돌립니다 — CAN은 리눅스 커널 기능(SocketCAN)이라 컨테이너가 호스트 커널의 CAN 인터페이스를 빌려야 하기 때문입니다. 윈도우/맥은 `mock` / `dev` 만 가능합니다.
+>
+> 📋 **첫 구동 전 반드시**: 전원/마운트/펌웨어·URDF 호환/첫 모션 안전절차까지 **[docs/real-robot-checklist.md](docs/real-robot-checklist.md)** 를 먼저 읽으세요. 아래는 요약입니다.
 
-1. 호스트에서 CAN 인터페이스를 올립니다 (sudo 필요):
+**호스트 OS 는 안 따집니다.** 22.04 노트북이든 24.04 든 컨테이너 안은 Jazzy 로 자기완결이라 상관없음. 호스트에서 필요한 건 ① 커널 SocketCAN/gs_usb(22.04·24.04 다 내장) ② Docker ③ USB-CAN 어댑터 ④ amd64 CPU(`uname -m`=x86_64, 이미지가 amd64 전용) 뿐. **로봇이 꽂힌 그 머신에서 `real` 을 돌려야 함**(SocketCAN 은 로컬 커널 기능 → 원격 불가).
 
-   ```bash
-   sudo ./scripts/host-can-up.sh
-   ```
+**띄우기 전 체크 (요약):**
+- [ ] `uname -m` = `x86_64`, Docker + compose v2 설치, 이미지 pull(또는 build)
+- [ ] USB-CAN 꽂고 `ip link show type can` 으로 can0 확인
+- [ ] **전원 24 V·≥10 A**, 베이스 **M5 4볼트 고정**, 작업반경 **626 mm 비우기**, 페이로드 ≤1.5 kg
+- [ ] **물리 E-stop 없음** → 24 V 커넥터에 손 올릴 사람 지정
+- [ ] 그리퍼 없으면 `EFFECTOR_TYPE=none` (compose `real` 블록에 줄이 없으니 추가하거나 `EFFECTOR_TYPE=none docker compose --profile real up`)
+- [ ] 펌웨어 **≥ S-V1.6-3**(URDF DH 일치), 가능하면 ≥ S-V1.8-5 (기동 로그에서 확인)
 
-2. 팔에 전원을 넣습니다.
+**구동:**
+```bash
+sudo ./scripts/host-can-up.sh        # gs_usb 로드 + can0 up @1Mbps (down-first, txqueuelen 포함)
+candump can0                          # (팔 켠 상태) 프레임 흐르는지 확인
+docker compose --profile real up      # real = host network → 데스크탑은 http://localhost (포트 80, 6080 아님)
+```
 
-3. real 프로파일로 띄웁니다:
+**기동(~30초) 후 첫 모션 — MoveIt Plan & Execute 만:**
+- `ros2 control list_controllers` active 확인 + `ros2 topic echo --once /feedback/joint_states` 값이 실제 자세와 일치하는지 확인 (안 맞으면 멈추기)
+- RViz 에서 velocity/accel scaling **0.05–0.10**, Goal `home`, **Plan → 궤적 확인 → Execute** (전원에 손 올린 채)
+- ❌ 첫 구동에 컨트롤러 직접 `action send_goal` / MIT / `fast_mode` 금지 (충돌·리밋 검사 우회)
 
-   ```bash
-   docker compose --profile real up
-   ```
-
-real 서비스는 `network_mode: host` + `privileged: true` 로 돌아갑니다 (can0 접근 위해). **host 네트워크라서 compose 의 포트 매핑(6080:80)이 무시되고, noVNC 는 컨테이너 내부 포트 그대로 호스트의 80 번에 노출됩니다** → `http://localhost` (6080 아님, 그냥 80).
-
-기본 CAN 인터페이스/보율은 `versions.env` 의 `CAN_IFACE=can0` / `CAN_BITRATE=1000000` 입니다.
+기본 CAN 인터페이스/보율은 `versions.env` 의 `CAN_IFACE=can0` / `CAN_BITRATE=1000000`(1Mbps 고정).
 
 > ⚠️ **보안 경고**: `real` 은 `privileged: true` + `network_mode: host` 라서 사실상 **호스트 root 권한과 동등**하고, noVNC 데스크탑은 **무인증으로 호스트 80 번에 그대로 열립니다** (LAN 에서 누구나 접속 → 팔을 움직일 수 있음). 신뢰할 수 있는 랩 머신 + 격리된 네트워크에서만 쓰고, 공용망에 노출하지 마세요. (mock/dev 는 compose 에서 `127.0.0.1` 로만 바인딩되어 안전.)
+>
+> 🖥️ **노트북 CPU 가 플래닝에 버거우면**: 로봇은 노트북, 연산은 24.04 PC 로 나누는 분산(ROS2 multi-machine) 구성도 가능. 단 **저수준 제어는 노트북 로컬 유지 + 유선 LAN 필수**. [체크리스트 §7](docs/real-robot-checklist.md) 참고.
 
 ---
 

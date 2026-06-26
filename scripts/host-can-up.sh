@@ -27,7 +27,14 @@ if ! modprobe gs_usb; then
 fi
 
 echo "==> Bringing up ${IFACE} as CAN @ ${BITRATE} bit/s"
+# Bring down first — if the iface is already UP (previous run / wrong bitrate),
+# reconfiguring while UP fails with "Device or resource busy". AgileX's own
+# can_activate.sh does the same. Tolerate the iface not existing yet.
+ip link set "${IFACE}" down 2>/dev/null || true
 ip link set "${IFACE}" up type can bitrate "${BITRATE}"
+# Bigger TX queue: a single Piper streams thousands of frames/s; the default
+# txqueuelen (10) can drop frames under bursts. Best-effort (ignore if unsupported).
+ip link set "${IFACE}" txqueuelen 65536 2>/dev/null || true
 
 echo "==> Interface state:"
 ip -details link show "${IFACE}"
