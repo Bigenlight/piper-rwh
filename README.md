@@ -166,9 +166,14 @@ LC_NUMERIC=C ros2 launch agx_arm_moveit demo.launch.py arm_type:=piper effector_
 > **현재 이 호스트에 CAN 어댑터가 없어 네이티브로는 아직 검증되지 않았습니다.** 인자명/동작은 실제 하드웨어에서 확인하세요.
 
 ```bash
+# 0) 어댑터 인식 확인 (팔 전원 켠 상태)
+lsusb | grep -iE "1d50|606f"          # gs_usb USB-CAN 어댑터 보이는지
+ip link show type can                  # can0 가 (DOWN 이라도) 잡혀 있어야 정상
+
 # 1) 호스트 CAN 올리기 + 확인 (sudo 필요)
 sudo ./scripts/host-can-up.sh        # gs_usb 로드 + can0 up @1Mbps (down-first, txqueuelen 포함)
 candump can0                          # (팔 켠 상태) 프레임 흐르는지 확인
+ip -details -statistics link show can0 # state UP + ERROR-ACTIVE(정상). BUS-OFF 면 케이블/종단/전원 확인
 
 # 2) 띄우기
 source /opt/ros/jazzy/setup.bash
@@ -186,7 +191,24 @@ LC_NUMERIC=C ros2 launch agx_arm_ctrl start_single_agx_arm_moveit.launch.py \
 - RViz 에서 velocity/accel scaling **0.05–0.10**, Goal `home`, **Plan → 궤적 확인 → Execute** (전원에 손 올린 채)
 - ❌ 첫 구동에 컨트롤러 직접 `action send_goal` / MIT / `fast_mode` 금지 (충돌·리밋 검사 우회)
 
-기본 CAN 인터페이스/보율은 `versions.env` 의 `CAN_IFACE=can0` / `CAN_BITRATE=1000000`(1Mbps 고정).
+**비상정지 (모션 중 이상하면):**
+```bash
+# 소프트 정지 = 현재 자세 유지 (물리 E-stop 이 없으니 이게 소프트 스톱). 안 되면 24V 커넥터를 뽑는다.
+ros2 service call /emergency_stop std_srvs/srv/Empty "{}"
+```
+
+**안전 종료 순서 (⚠️ 이 순서 지킬 것 — 잘못하면 팔이 떨어진다):**
+```bash
+# 1) RViz 로 팔을 낮고 안정된 rest 자세로 이동 (home=곧게 선 자세라 rest 아님!)
+# 2) 그 rest 자세에서만 모터 disable (disable 시 팔에 힘 풀림 → 받쳐진 자세에서만)
+ros2 service call /enable_agx_arm std_srvs/srv/SetBool "{data: false}"
+# 3) 런치 터미널에서 Ctrl-C (안 죽으면: pkill -f start_single_agx_arm_moveit)
+# 4) CAN 내리기
+sudo ip link set can0 down
+```
+> 모션 중이거나 rest 아닌 위치에서 launch 를 kill / 모터 disable 하지 마세요 — 팔이 최저에너지 자세로 떨어져 테이블·자기 자신을 칩니다.
+
+기본 CAN 인터페이스/보율은 `versions.env` 의 `CAN_IFACE=can0` / `CAN_BITRATE=1000000`(1Mbps 고정). 더 자세한 절차·안전·트러블슈팅은 **[docs/real-robot-checklist.md](docs/real-robot-checklist.md)** 참고.
 
 > 🖥️ **노트북 CPU 가 플래닝에 버거우면**: 로봇은 노트북, 연산은 다른 PC 로 나누는 분산(ROS 2 multi-machine) 구성도 가능. 단 **저수준 제어는 로봇 붙은 머신에 로컬 유지 + 유선 LAN 필수**. [체크리스트 §7](docs/real-robot-checklist.md) 참고.
 
