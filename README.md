@@ -298,6 +298,24 @@ LC_NUMERIC=C ros2 launch ~/piper-rwh/examples/python/ex03_moveit_py.launch.py
 
 > 기본으로 **RViz 가 떠서 팔이 움직이는 걸 볼 수 있습니다**(RViz 가 먼저 뜨도록 모션은 시작 ~6초 뒤부터). 헤드리스로 돌리려면 `use_rviz:=false`. 스크립트가 `예제 완료`를 찍어도 런치는 계속 떠 있으니 확인 후 **Ctrl-C** 로 종료하세요.
 
+### moveit_py 인터랙티브 노트북 (⭐ 추천 — 재빌드/재시작 없는 반복)
+
+스크립트를 고치고 런치를 재시작하는 대신, **주피터 커널을 살려둔 채 셀만 다시 실행**하면
+로봇이 실시간으로 움직입니다. `move_group`·컨트롤러가 안 꺼지니 **목표/포즈/파라미터를
+바꾸는 파이썬 반복은 colcon 재빌드도, 런치 재시작도 필요 없습니다**(URDF/SRDF/컨트롤러를
+바꿀 때만 런치 재시작). VS Code 로도 열어서 실행할 수 있습니다.
+
+```bash
+pip3 install --user --break-system-packages notebook ipykernel   # 최초 1회 (PEP668)
+source /opt/ros/jazzy/setup.bash
+source ~/piper-rwh/ros2_ws/install/setup.bash
+LC_NUMERIC=C ros2 launch ~/piper-rwh/examples/python/ex03_moveit_py_notebook.launch.py
+```
+
+노트북 3종(`ex03_nb01_arm_motions` 팔 모션 · `ex03_nb02_gripper_and_scene` 그리퍼+씬 ·
+`ex03_nb03_interactive_playground` 라이브 놀이터)과 VS Code 실행법·gotcha 는
+**[examples/python/README.md](examples/python/README.md#moveit_py-인터랙티브-노트북-ex03_nb0123ipynb--추천)** 참고.
+
 ---
 
 ## 참고자료
