@@ -25,8 +25,8 @@ XACRO_MAPPINGS = {
     "arm_type": "piper",
     "effector_type": "agx_gripper",
     "revo2_type": "left",
-    "tcp_offset_xyz": "0.0 0.0 0.0",
-    "tcp_offset_rpy": "0.0 0.0 0.0",
+    "tcp_offset_xyz": "0.0 0.0 0.1425",  # link6 -> 그리퍼 EEF(파지 끝단) TCP, +z 방향
+    "tcp_offset_rpy": "0.0 0.0 0.0",     # 회전 0: 접근축이 곧 link6 +z (gripper_base 가 flange +z 에 정렬)
 }
 SRDF_MAPPINGS = {
     "arm_type": "piper",

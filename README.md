@@ -316,6 +316,12 @@ LC_NUMERIC=C ros2 launch ~/piper-rwh/examples/python/ex03_moveit_py_notebook.lau
 `ex03_nb03_interactive_playground` 라이브 놀이터)과 VS Code 실행법·gotcha 는
 **[examples/python/README.md](examples/python/README.md#moveit_py-인터랙티브-노트북-ex03_nb0123ipynb--추천)** 참고.
 
+> 🎯 **Cartesian(EEF) 조종**: `ex03_nb03` 은 관절뿐 아니라 **그리퍼 끝단(EEF) 기준의 3D 포즈**로도
+> 조종합니다 — `go_pose(x,y,z, qx,qy,qz,qw)`(위치+자세) · `nudge(dx,dy,dz)`(현재 위치에서 상대 이동)
+> · `current_pose()`(현재 포즈 조회). 기준점은 `tcp_offset_xyz="0.0 0.0 0.1425"` 로 `tcp_link` 를
+> `link6`(플랜지)에서 +z 0.1425m(=그리퍼 파지 끝단)에 배치해 맞췄습니다(`moveit_py_params.py`).
+> 손끝보다 안쪽 파지점을 쓰려면 그 값을 0.10~0.12 로 줄이면 됩니다.
+
 ---
 
 ## 참고자료
